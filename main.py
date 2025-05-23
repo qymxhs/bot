@@ -1,7 +1,8 @@
 # FastAPI + OpenAI 后端实现
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 import openai
@@ -11,7 +12,6 @@ from dotenv import load_dotenv
 import logging
 import uuid
 import aiofiles
-import asyncio
 
 # 加载环境变量
 load_dotenv()
@@ -64,7 +64,7 @@ async def chat(request: ChatRequest, api_key: str = Depends(verify_api_key)):
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
         
         response = client.chat.completions.create(
-            model="gpt-4",  # 可调整为适合的模型
+            model="gpt-4o-mini",  # 可调整为适合的模型
             messages=messages
         )
         
@@ -74,9 +74,15 @@ async def chat(request: ChatRequest, api_key: str = Depends(verify_api_key)):
         raise HTTPException(status_code=500, detail=f"处理聊天请求时出错: {str(e)}")
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...), api_key: str = Depends(verify_api_key)):
+async def upload_file(file: UploadFile = File(...)):
     """处理单个文件上传"""
     try:
+        # 检查文件大小
+        contents = await file.read()
+        file_size = len(contents)
+        if file_size > 10 * 1024 * 1024:  # 10MB 限制
+            raise HTTPException(status_code=413, detail="文件大小超过限制（最大10MB）")
+                
         # 生成唯一文件名避免冲突
         file_id = uuid.uuid4()
         file_extension = os.path.splitext(file.filename)[1]
@@ -84,8 +90,10 @@ async def upload_file(file: UploadFile = File(...), api_key: str = Depends(verif
         
         # 保存上传的文件
         async with aiofiles.open(temp_file_path, 'wb') as out_file:
-            content = await file.read()
-            await out_file.write(content)
+            await out_file.write(contents)
+            
+        # 重置文件指针，以便后续读取
+        await file.seek(0)
         
         # 根据文件类型处理
         if file.content_type.startswith("text/"):
@@ -94,7 +102,7 @@ async def upload_file(file: UploadFile = File(...), api_key: str = Depends(verif
                 file_content = await text_file.read()
             
             response = client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "分析用户上传的文本文件并提供见解。"},
                     {"role": "user", "content": f"以下是文件 {file.filename} 的内容:\n\n{file_content}"}
@@ -105,7 +113,7 @@ async def upload_file(file: UploadFile = File(...), api_key: str = Depends(verif
             # 处理图片文件
             with open(temp_file_path, "rb") as image_file:
                 response = client.chat.completions.create(
-                    model="gpt-4-vision-preview",
+                    model="gpt-4o",
                     messages=[
                         {
                             "role": "user",
@@ -176,7 +184,7 @@ async def chat_with_files(
                 content.append({"type": "text", "text": f"文件 {file.filename} 内容:\n{text_content}"})
         
         # 确定使用的模型
-        model = "gpt-4-vision-preview" if any(file.content_type.startswith("image/") for file in files) else "gpt-4"
+        model = "gpt-4o" if any(file.content_type.startswith("image/") for file in files) else "gpt-4o-mini"
         
         # 调用OpenAI API
         response = client.chat.completions.create(
@@ -198,10 +206,13 @@ async def chat_with_files(
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
+# 在所有路由之前挂载静态文件
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 @app.get("/")
 async def root():
-    """API根路径，提供基本信息"""
-    return {"message": "ChatGPT文件上传API服务已启动", "docs": "/docs"}
+    """重定向到首页"""
+    return FileResponse("static/index.html")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

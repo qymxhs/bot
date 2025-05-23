@@ -191,6 +191,14 @@
         justify-content: space-between;
         max-width: 800px;
         width: 100%;
+        font-size: 14px;
+    }
+
+    .file-preview span:first-child {
+        max-width: 70%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     /* 响应式设计 */
@@ -272,11 +280,13 @@ async function sendMessage() {
         
         try {
             // 发送消息到后端
-            const response = await fetch('http://localhost:8000/chat', {
+            const response = await fetch('/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     messages: [
                         { role: 'user', content: message }
@@ -294,22 +304,61 @@ async function sendMessage() {
     }
 }
 
-// 处理文件上传
+// 显示文件预览
+function showFilePreview(file) {
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'file-preview';
+    previewDiv.innerHTML = `
+        <span>${file.name}</span>
+        <span>${(file.size / 1024).toFixed(2)} KB</span>
+    `;
+    
+    chatContainer.appendChild(previewDiv);
+    addMessage(`正在上传文件: ${file.name}`, 'user');
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// 文件上传处理函数
 async function uploadFile(file) {
     try {
         const formData = new FormData();
         formData.append('file', file);
         
-        const response = await fetch('http://localhost:8000/upload', {
+        const response = await fetch('/upload', {
             method: 'POST',
             body: formData,
+            headers: {
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin'
         });
         
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '未知错误');
+            throw new Error(
+                response.status === 413 ? '文件太大' :
+                response.status === 415 ? '不支持的文件类型' :
+                response.status === 404 ? '服务器连接失败' :
+                `上传失败 (${response.status}): ${errorText}`
+            );
+        }
+        
         const data = await response.json();
-        addMessage(data.response, 'ai');
+        addMessage(`文件 "${file.name}" 分析结果:\n${data.response}`, 'ai');
     } catch (error) {
         console.error('Upload error:', error);
-        addMessage('上传文件时出错，请重试。', 'ai');
+        // 根据不同错误类型显示不同的错误信息
+        let errorMessage = '上传失败: ';
+        if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+            errorMessage += '无法连接到服务器，请检查网络连接';
+        } else if (error.message === 'Network Error') {
+            errorMessage += '网络连接错误';
+        } else if (error.message === 'The user aborted a request') {
+            errorMessage += '上传已取消';
+        } else {
+            errorMessage += error.message;
+        }
+        addMessage(errorMessage, 'ai');
     }
 }
 
@@ -340,38 +389,17 @@ async function uploadFile(file) {
             fileInput.click();
         });
 
-        fileInput.addEventListener('change', (e) => {
+        fileInput.addEventListener('change', async (e) => {
             const files = e.target.files;
             if (files.length > 0) {
                 for (let i = 0; i < files.length; i++) {
                     showFilePreview(files[i]);
+                    await uploadFile(files[i]);
                 }
             }
+            // 清空文件输入框,允许重复上传相同文件
+            fileInput.value = '';
         });
-
-        function showFilePreview(file) {
-            // 创建文件预览元素
-            const previewDiv = document.createElement('div');
-            previewDiv.className = 'file-preview';
-            previewDiv.innerHTML = `
-                <span>${file.name}</span>
-                <span>${(file.size / 1024).toFixed(2)} KB</span>
-            `;
-            
-            // 添加到聊天区域
-            chatContainer.appendChild(previewDiv);
-            
-            // 在实际聊天中添加上传提示
-            addMessage(`我上传了文件: ${file.name}`, 'user');
-            
-            // 滚动到底部
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-            
-            // 模拟AI回复
-            setTimeout(() => {
-                addMessage(`我已收到你上传的文件 "${file.name}"。需要我如何处理这个文件？`, 'ai');
-            }, 1000);
-        }
 
         // 发送按钮点击事件
         sendBtn.addEventListener('click', sendMessage);
