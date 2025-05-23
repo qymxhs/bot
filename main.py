@@ -1,4 +1,3 @@
-# FastAPI + OpenAI 后端实现
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -24,7 +23,7 @@ if not OPENAI_API_KEY:
 # 创建OpenAI客户端
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="ChatGPT API")
+app = FastAPI(title="codex API")
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -206,7 +205,7 @@ async def chat_with_files(
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-# 在所有路由之前挂载静态文件
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
